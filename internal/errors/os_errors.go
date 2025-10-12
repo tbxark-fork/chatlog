@@ -1,6 +1,8 @@
 package errors
 
-import "net/http"
+import (
+	"net/http"
+)
 
 func OpenFileFailed(path string, cause error) *Error {
 	return Newf(cause, http.StatusInternalServerError, "failed to open file: %s", path).WithStack()

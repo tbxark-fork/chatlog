@@ -136,3 +136,90 @@ func DecryptPage(pageBuf []byte, encKey []byte, macKey []byte, pageNum int64, ha
 
 	return decryptedPage, nil
 }
+
+func EncryptPage(plainPage []byte, encKey []byte, macKey []byte, pageNum int64, hashFunc func() hash.Hash, hmacSize int, reserve int, pageSize int) ([]byte, error) {
+	if hashFunc == nil {
+		return nil, fmt.Errorf("hash function is nil")
+	}
+
+	offset := 0
+	if pageNum == 0 {
+		offset = SaltSize
+	}
+
+	var (
+		pagePayload []byte
+		salt        []byte
+	)
+
+	switch pageNum {
+	case 0:
+		switch len(plainPage) {
+		case pageSize:
+			// Caller provided salt in the leading SaltSize bytes.
+			salt = plainPage[:SaltSize]
+			pagePayload = plainPage[SaltSize:]
+		case pageSize - SaltSize:
+			// Caller did not include salt; keep the prefix zeroed for the caller to fill.
+			pagePayload = plainPage
+		default:
+			return nil, fmt.Errorf("invalid plain page size %d for page %d", len(plainPage), pageNum)
+		}
+	default:
+		if len(plainPage) != pageSize {
+			return nil, fmt.Errorf("invalid plain page size %d for page %d", len(plainPage), pageNum)
+		}
+		pagePayload = plainPage
+	}
+
+	if len(pagePayload) < reserve {
+		return nil, fmt.Errorf("plain page size %d smaller than reserve %d for page %d", len(pagePayload), reserve, pageNum)
+	}
+
+	dataLen := len(pagePayload) - reserve
+	if dataLen < 0 || dataLen%AESBlockSize != 0 {
+		return nil, fmt.Errorf("invalid plain data length %d for page %d", dataLen, pageNum)
+	}
+
+	if reserve < IVSize+hmacSize {
+		return nil, fmt.Errorf("reserve size %d too small for IV(%d) and HMAC(%d)", reserve, IVSize, hmacSize)
+	}
+
+	plainData := pagePayload[:dataLen]
+	tail := pagePayload[dataLen:]
+
+	block, err := aes.NewCipher(encKey)
+	if err != nil {
+		return nil, errors.DecryptCreateCipherFailed(err)
+	}
+
+	encryptedData := make([]byte, dataLen)
+	copy(encryptedData, plainData)
+
+	iv := tail[:IVSize]
+	mode := cipher.NewCBCEncrypter(block, iv)
+	mode.CryptBlocks(encryptedData, encryptedData)
+
+	pageBuf := make([]byte, pageSize)
+	if pageNum == 0 && salt != nil {
+		copy(pageBuf[:SaltSize], salt)
+	}
+
+	copy(pageBuf[offset:], encryptedData)
+	copy(pageBuf[pageSize-reserve:], tail)
+
+	mac := hmac.New(hashFunc, macKey)
+	mac.Write(pageBuf[offset : pageSize-reserve+IVSize])
+
+	pageNoBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(pageNoBytes, uint32(pageNum+1))
+	mac.Write(pageNoBytes)
+
+	calculatedMAC := mac.Sum(nil)
+	if len(calculatedMAC) < hmacSize {
+		return nil, fmt.Errorf("calculated HMAC length %d smaller than expected %d", len(calculatedMAC), hmacSize)
+	}
+	copy(pageBuf[pageSize-reserve+IVSize:], calculatedMAC[:hmacSize])
+
+	return pageBuf, nil
+}

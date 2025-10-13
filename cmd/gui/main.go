@@ -147,7 +147,7 @@ func run() error {
 				return
 			}
 			path := reader.URI().Path()
-			reader.Close()
+			_ = reader.Close()
 			_ = fileValue.Set(path)
 			if currentDir, _ := outputValue.Get(); currentDir == "" {
 				_ = outputValue.Set(filepath.Dir(path))
@@ -232,7 +232,7 @@ func run() error {
 	)
 
 	w.SetContent(container.NewPadded(content))
-	w.Resize(fyne.NewSize(600, 320))
+	w.Resize(fyne.NewSize(800, 600))
 	w.ShowAndRun()
 	return nil
 }

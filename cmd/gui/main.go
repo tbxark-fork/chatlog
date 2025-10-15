@@ -179,7 +179,8 @@ func run() error {
 
 	statusLabel := widget.NewLabelWithData(statusValue)
 
-	buttons := container.NewHBox(
+	buttons := container.NewGridWithColumns(
+		2,
 		widget.NewButton("加密", func() {
 			go func() {
 				hexKey, _ := keyValue.Get()
